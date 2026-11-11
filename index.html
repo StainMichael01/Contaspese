@@ -374,6 +374,18 @@ code{font-family:var(--font-mono);font-size:.84em;background:var(--accent-soft);
 
   <!-- Regole -->
   <section class="view" id="v-regole" hidden>
+    <div class="sec" id="gh-sec" hidden>
+      <h2>Apple Pay automatico</h2>
+      <p class="lead">Il comando rapido invia ogni pagamento Apple Pay al tuo repository privato su GitHub. Quando apri Contaspese, i pagamenti arrivati vengono aggiunti da soli.</p>
+      <div class="card">
+        <label class="field" for="gh-repo"><span>Repository</span><input id="gh-repo" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="StainMichael01/contaspese-dati"></label>
+        <label class="field" for="gh-token"><span>Chiave di accesso</span><input id="gh-token" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="github_pat_…"></label>
+        <p class="hint">La chiave resta solo su questo telefono e non finisce nei backup.</p>
+        <div class="inline"><button class="btn" id="gh-save" type="button">Salva e controlla</button><button class="btn ghost" id="gh-off" type="button" hidden>Scollega</button></div>
+        <p class="hint" id="gh-status"></p>
+      </div>
+    </div>
+
     <div class="sec">
       <h2>Tetto di spesa mensile</h2>
       <div class="inline">
@@ -1097,7 +1109,7 @@ const L = (() => {
     $('#fab').disabled = !S.ready;
     if (S.view === 'spese') renderSpese();
     else if (S.view === 'riepilogo') renderRiepilogo();
-    else if (S.view === 'regole') renderRegole();
+    else if (S.view === 'regole') { renderRegole(); renderGh(); }
     else if (S.view === 'importa' && !background) renderPreview();
   }
   function go(view, fromHash) {
@@ -1260,6 +1272,14 @@ const L = (() => {
   function doImport() {
     const p = S.preview;
     if (!p || !p.fresh || !p.fresh.length) return;
+    const last = applyImport(p), n = p.fresh.length;
+    S.preview = null; $('#imp-text').value = ''; $('#imp-file').value = '';
+    S.ym = last.slice(0, 7); S.filter = '';
+    go('spese');
+    toast(n === 1 ? '1 movimento aggiunto' : n + ' movimenti aggiunti');
+  }
+  // Writes the new records of a sorted import and links the ones already here; returns the latest date.
+  function applyImport(p) {
     const touched = {}, now = nowLocal();
     let last = '';
     p.fresh.forEach(r => {
@@ -1272,13 +1292,73 @@ const L = (() => {
       if (d > last) last = d;
     });
     p.links.forEach(l => { const mo = S.months[l.ym], e = mo && mo.items[l.id]; if (e) { e.bk = l.key; touched[l.ym] = 1; } });
-    dropExamples();
+    if (p.fresh.length) dropExamples();
     Object.keys(touched).forEach(ym => Store.save('m-' + ym));
-    const n = p.fresh.length;
-    S.preview = null; $('#imp-text').value = ''; $('#imp-file').value = '';
-    S.ym = last.slice(0, 7); S.filter = '';
-    go('spese');
-    toast(n === 1 ? '1 movimento aggiunto' : n + ' movimenti aggiunti');
+    return last || now;
+  }
+
+  /* ---------- Apple Pay through a private GitHub repository ----------
+     The Shortcut opens one issue per payment, titled with the usual line "date ; merchant ; amount ; card".
+     On every opening the app reads the open issues, adds the payments and closes the issues. */
+  const GH = 'contaspese.github';
+  const gh = {repo: '', token: '', busy: false, status: ''};
+  try { Object.assign(gh, JSON.parse(localStorage.getItem(GH) || '{}')); } catch (e) {}
+  const ghSaveCfg = () => { try { localStorage.setItem(GH, JSON.stringify({repo: gh.repo, token: gh.token})); } catch (e) {} };
+  async function ghFetch(path, opts) {
+    const r = await fetch('https://api.github.com/repos/' + gh.repo + path, Object.assign({cache: 'no-store'}, opts || {}, {
+      headers: Object.assign({'Authorization': 'Bearer ' + gh.token, 'Accept': 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28'}, (opts && opts.headers) || {})
+    }));
+    if (!r.ok) { const e = new Error('http ' + r.status); e.status = r.status; throw e; }
+    return r.status === 204 ? null : r.json();
+  }
+  const ghWhy = e => !e || !e.status ? 'GitHub non risponde. Controlla la connessione.'
+    : e.status === 401 ? 'La chiave non è valida o è scaduta. Creane una nuova su GitHub e incollala qui.'
+    : e.status === 403 ? 'La chiave non ha il permesso sulle Issues di questo repository.'
+    : e.status === 404 ? 'Repository non trovato. Controlla il nome e che la chiave abbia accesso proprio a questo repository.'
+    : e.status === 410 ? 'Le Issues sono disattivate in questo repository: riattivale in Settings.'
+    : 'GitHub ha risposto con un errore (' + e.status + ').';
+  function renderGh() {
+    $('#gh-sec').hidden = !STANDALONE;
+    if (!STANDALONE) return;
+    if (document.activeElement !== $('#gh-repo')) $('#gh-repo').value = gh.repo || '';
+    if (document.activeElement !== $('#gh-token')) $('#gh-token').value = gh.token || '';
+    $('#gh-off').hidden = !gh.token;
+    $('#gh-status').textContent = gh.status || (gh.token ? 'Collegato.' : 'Non collegato.');
+  }
+  async function ghSync(manual) {
+    if (!STANDALONE || !gh.repo || !gh.token || gh.busy || !S.ready) return;
+    gh.busy = true;
+    try {
+      let issues = [];
+      for (let page = 1; page <= 5; page++) {
+        const list = await ghFetch('/issues?state=open&per_page=100&sort=created&direction=asc&page=' + page);
+        issues = issues.concat(list.filter(i => !i.pull_request));
+        if (list.length < 100) break;
+      }
+      const recs = [], done = [];
+      issues.forEach(i => {
+        const r = L.parseLines(String(i.title || '') + (i.body && !/;/.test(i.title || '') ? '\n' + i.body : ''))[0];
+        if (!r || r.err) return;
+        recs.push(r); done.push(i.number);
+      });
+      let n = 0;
+      if (recs.length) {
+        const p = sortRecords(recs, 'ap');
+        n = p.fresh.length;
+        const last = applyImport(p);
+        if (n) { S.ym = last.slice(0, 7); S.filter = ''; }
+      }
+      for (const num of done) { try { await ghFetch('/issues/' + num, {method: 'PATCH', body: JSON.stringify({state: 'closed', state_reason: 'completed'})}); } catch (e) { break; } }
+      gh.status = 'Collegato. Ultimo controllo alle ' + nowLocal().slice(11) + (n ? ': ' + (n === 1 ? '1 pagamento aggiunto.' : n + ' pagamenti aggiunti.') : '.');
+      render();
+      if (n) toast(n === 1 ? '1 pagamento Apple Pay aggiunto' : n + ' pagamenti Apple Pay aggiunti');
+      else if (manual) toast('Collegamento riuscito');
+    } catch (e) {
+      gh.status = ghWhy(e);
+      if (manual || (e && e.status === 401)) { render(); toast(e && e.status ? 'GitHub ha rifiutato la richiesta' : 'GitHub non risponde'); }
+    }
+    gh.busy = false;
+    renderGh();
   }
 
   /* ---------- files: CSV, backup, restore ---------- */
@@ -1383,6 +1463,15 @@ const L = (() => {
       case 'imp-go': return doImport();
       case 'csv': return exportCsv();
       case 'backup': return backup();
+      case 'gh-save': {
+        const repo = $('#gh-repo').value.trim().replace(/^https?:\/\/github\.com\//i, '').replace(/\.git$/, '').replace(/\/+$/, '');
+        const token = $('#gh-token').value.trim();
+        if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) return toast('Scrivi il repository come nome-utente/nome-repository');
+        if (!token) return toast('Incolla la chiave di accesso');
+        gh.repo = repo; gh.token = token; gh.status = 'Controllo…'; ghSaveCfg(); renderGh();
+        return ghSync(true);
+      }
+      case 'gh-off': gh.token = ''; gh.status = ''; ghSaveCfg(); renderGh(); return toast('Scollegato');
       case 'bud-save': {
         const raw = $('#bud').value.trim(), v = raw ? L.parseAmount(raw) : null;
         if (raw && (v == null || v <= 0)) return toast('Scrivi una cifra, ad esempio 1500');
@@ -1417,6 +1506,11 @@ const L = (() => {
     if (f) readFile(f);
   });
   window.addEventListener('hashchange', () => { const v = location.hash.replace('#', ''); if (v && v !== S.view) go(v, true); });
+
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') ghSync(false); });
+  window.addEventListener('focus', () => ghSync(false));
+  (function waitReady(t) { if (S.ready) ghSync(false); else if (t < 100) setTimeout(() => waitReady(t + 1), 150); })(0);
+  if (STANDALONE && !gh.repo) gh.repo = 'StainMichael01/contaspese-dati';
 
   const h0 = (location.hash || '').replace('#', '');
   if (['riepilogo', 'importa', 'regole'].indexOf(h0) >= 0) S.view = h0;
