@@ -1,5 +1,5 @@
 // Keeps the app usable offline. Bump VERSION when the app changes.
-const VERSION = 'contaspese-v2';
+const VERSION = 'contaspese-v1';
 const SHELL = ['./', './index.html', './manifest.webmanifest', './icon-180.png', './icon-192.png', './icon-512.png'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(VERSION).then(c => c.addAll(SHELL)).then(() => self.skipWaiting())); });
 self.addEventListener('activate', e => {

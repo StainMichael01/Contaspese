@@ -7,17 +7,16 @@
 <meta name="description" content="Entrate, uscite e saldo del mese, con categorie automatiche.">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="Contaspese">
-<meta name="theme-color" content="#2D38D8">
+<meta name="theme-color" content="#F1F2FB" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0B0C1E" media="(prefers-color-scheme: dark)">
 <link rel="apple-touch-icon" href="icon-180.png">
 <link rel="icon" type="image/png" href="icon-192.png">
 <link rel="manifest" href="manifest.webmanifest">
 <style>
-:root{color-scheme:light;padding-top:env(safe-area-inset-top,0px)}
+:root{color-scheme:light;padding-top:env(safe-area-inset-top,0px);}
 body{margin:0;font:14px system-ui}img{max-width:100%}[hidden]{display:none!important}
-/* The status bar sits over the page: paint it in the app's blue so its white text stays readable. */
-body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:40;background:#2D38D8}
 html,body{overscroll-behavior-y:none}
 </style>
 </head>
