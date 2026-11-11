@@ -18,6 +18,8 @@
 :root{color-scheme:light;padding-top:env(safe-area-inset-top,0px);}
 body{margin:0;font:14px system-ui}img{max-width:100%}[hidden]{display:none!important}
 html,body{overscroll-behavior-y:none}
+/* iOS blurs a strip just below the status bar: start the content clear of it. */
+html body{padding-top:30px}
 </style>
 </head>
 <body>
